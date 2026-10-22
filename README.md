@@ -10,6 +10,7 @@ npm install
 npm run dev        # Viewer "Character Forge" auf http://localhost:5173
 npm test           # Vitest (Topologie, Rig, Layer, Performance)
 npm run build      # Typecheck + Produktions-Build
+npm run build:artifact  # Viewer als eine einzelne HTML-Seite (dist-artifact/)
 ```
 
 ## Idee in einem Satz

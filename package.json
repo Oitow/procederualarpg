@@ -2,14 +2,15 @@
   "name": "procedural-arpg",
   "version": "0.1.0",
   "private": true,
-  "description": "Idle/auto-battler ARPG – procedural character system",
+  "description": "Idle/auto-battler ARPG \u2013 procedural character system",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:artifact": "node scripts/build-artifact.mjs"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",

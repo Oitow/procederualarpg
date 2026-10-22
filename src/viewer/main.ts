@@ -21,7 +21,6 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import {
   BONE_INDEX,
   BONE_NAMES,
@@ -42,6 +41,10 @@ import {
   makeParams,
   samplePose,
 } from '../character';
+
+/** Built as a standalone web page (no file downloads allowed there). */
+const ARTIFACT = import.meta.env.MODE === 'artifact';
+const NARROW = window.innerWidth < 700;
 
 // ---------------------------------------------------------------------------
 // scene
@@ -71,7 +74,7 @@ scene.add(new HemisphereLight('#cfd8ff', '#3a2e22', 0.9));
 const sun = new DirectionalLight('#fff1dd', 2.4);
 sun.position.set(3, 6, 4);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.setScalar(NARROW ? 1024 : 2048);
 sun.shadow.camera.left = -2;
 sun.shadow.camera.right = 2;
 sun.shadow.camera.top = 3;
@@ -97,7 +100,7 @@ params.variation = 0.3;
 const layerState: Record<string, boolean> = Object.fromEntries(Object.keys(LAYER_LIBRARY).map((id) => [id, false]));
 const state = {
   preset: 'Human',
-  outfit: 'Peasant',
+  outfit: 'Knight',
   clip: 'idle' as ClipName,
   speed: 1,
   view: 'shaded' as 'shaded' | 'weights' | 'regions',
@@ -204,7 +207,7 @@ function queueRegenerate() {
 // ---------------------------------------------------------------------------
 // GUI
 // ---------------------------------------------------------------------------
-const gui = new GUI({ title: 'Character Forge' });
+const gui = new GUI({ title: 'Controls' });
 const addRange = (folder: GUI, obj: Record<string, unknown>, key: string, range: Range, label?: string) =>
   folder.add(obj, key, range[0], range[1], range[2]).name(label ?? key).onChange(queueRegenerate);
 
@@ -284,29 +287,33 @@ fDebug.add(state, 'lineup').name('archetype lineup').onChange(queueRegenerate);
 fDebug.add(state, 'hideLayers').name('hide layers').onChange(applyView);
 fDebug.add(state, 'showCage').name('show cage').onChange((v: boolean) => cage && (cage.visible = v));
 fDebug.add(state, 'showSkeleton').name('show skeleton').onChange((v: boolean) => skeletonHelper && (skeletonHelper.visible = v));
-fDebug
-  .add(
-    {
-      exportGLB() {
-        if (!model) return;
-        new GLTFExporter().parse(
-          model.group,
-          (result) => {
-            const blob = new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `character_${params.seed}.glb`;
-            a.click();
-          },
-          (err) => console.error(err),
-          { binary: true },
-        );
+if (!ARTIFACT) {
+  fDebug
+    .add(
+      {
+        async exportGLB() {
+          if (!model) return;
+          const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
+          new GLTFExporter().parse(
+            model.group,
+            (result) => {
+              const blob = new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = `character_${params.seed}.glb`;
+              a.click();
+            },
+            (err) => console.error(err),
+            { binary: true },
+          );
+        },
       },
-    },
-    'exportGLB',
-  )
-  .name('export .glb');
+      'exportGLB',
+    )
+    .name('export .glb');
+}
 fDebug.close();
+if (NARROW) gui.close();
 
 // ---------------------------------------------------------------------------
 // loop
