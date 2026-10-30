@@ -34,13 +34,15 @@ describe('procedural items', () => {
     const cage = buildCage(rig, params);
     for (const slot of ITEM_SLOTS.filter((s) => s !== 'weapon')) {
       for (let s = 0; s < 12; s++) {
-        const item = generateItem(s * 7 + 1, { slot, rarity: s % 3 === 0 ? 'broken' : undefined });
+        const item = generateItem(s * 7 + 1, { slot, rarity: s % 3 === 0 ? 'broken' : s % 3 === 1 ? 'divine' : undefined });
         const layers = itemToLayers(item);
-        expect(layers).toHaveLength(1);
+        expect(layers.length).toBeGreaterThanOrEqual(1);
         const { shells } = buildLayerShells(cage, layers, rig.scale);
-        const t = analyzeTopology(shells[0].mesh);
-        expect(t.boundaryEdges, item.name).toBe(0);
-        expect(t.nonManifoldEdges, item.name).toBe(0);
+        for (const sh of shells) {
+          const t = analyzeTopology(sh.mesh);
+          expect(t.boundaryEdges, item.name).toBe(0);
+          expect(t.nonManifoldEdges, item.name).toBe(0);
+        }
       }
     }
   });
