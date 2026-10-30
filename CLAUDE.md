@@ -15,7 +15,7 @@ The owner writes in German (sometimes English); answer in the language they use.
 ## Stack & commands
 TypeScript + three.js (0.186), lil-gui, Vite 8, Vitest 5, TypeScript 7.
 - `npm run dev` – game at http://localhost:5173, lab at http://localhost:5173/lab/
-- `npm test` – 22 tests (topology, rig, layers, performance budget). Keep them green.
+- `npm test` – 33 tests (topology, rig, layers, performance budget). Keep them green.
 - `npm run typecheck`, `npm run build`
 - `npm run build:artifact` – viewer as one HTML page in `dist-artifact/` (three + lil-gui via jsDelivr import map)
 
@@ -38,6 +38,11 @@ or `character-forge.html` with that `url`, so the link stays the same.
 - `monsters/` (spider: 8 legs 2-bone IK stepping gait; rat: sine body/tail), `combat.ts` (waves of ~5 every 5 s,
   cap 25, auto-attack nearest in 1.6 m, weapon stats, contact damage, respawn), `hud.ts` (HP orb, kills/wave; CSS injected)
 - Hero animation: `gaitCadence` phase + `PoseBlender` cross-fades + `attackPose(progress)`.
+
+- `creator.ts` – start-screen character creator (archetype, sliders, skin incl. fantasy tones, hair/beard via
+  `src/character/hair.ts`); **Bloodline** = rune-name code of the whole look (localStorage `gloomvale.bloodline`).
+- Essences: `inventory.addEssence(kind)` – 2 of each at start, 35% per kill; infusion = `infuseItem` (src/items/essence.ts),
+  dyes; layer `extras` (spikes/horns/studs) build `<id>-x` shells.
 
 ## Items (`src/items/`)
 `generateItem(seed)` → rarity (broken…divine), base type, affixes, name; `theme` (material, element, broken, glow)

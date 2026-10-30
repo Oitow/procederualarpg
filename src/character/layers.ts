@@ -75,6 +75,23 @@ export interface LayerDef {
   /** Drop a random fraction (0-1) of the covered cage faces → holes (broken armour). */
   holes?: { density: number; seed: number };
   material: LayerMaterial;
+  /** Optional spikes / horns / studs grown on the covered faces; skinned with the shell weights. */
+  extras?: LayerExtra[];
+  /** Material of the extras (default dark metal). */
+  extraMaterial?: LayerMaterial;
+}
+
+export interface LayerExtra {
+  kind: 'spike' | 'horn' | 'stud';
+  /** Faces (within this layer's selection) that may carry an extra. */
+  cover: CoverRule[];
+  /** Fraction (0-1) of matching faces that get one. */
+  density: number;
+  /** Height in meters (reference scale). */
+  size: number;
+  seed: number;
+  /** Cap on the count (default 16). */
+  max?: number;
 }
 
 export const LAYER_LIBRARY: Record<string, LayerDef> = {
@@ -150,16 +167,16 @@ export const LAYER_LIBRARY: Record<string, LayerDef> = {
   pauldrons: {
     id: 'pauldrons', name: 'Pauldrons', kind: 'armor', slot: 'shoulders', order: 12,
     cover: [
-      { parts: ['upperarm'], to: 0.38, flare: [0.012, 0.02] },
+      { parts: ['upperarm'], to: 0.44, flare: [0.016, 0.03] },
       { parts: ['torso'], from: 0.8, lateralMin: 0.6 },
     ],
-    offset: 0.02, thickness: 0.009, rimSharpness: 3, rigidity: 0.9, conform: 0, hidesBody: true,
+    offset: 0.024, thickness: 0.009, rimSharpness: 3, rigidity: 0.9, conform: 0, hidesBody: true,
     material: { color: '#a7afb8', metalness: 0.9, roughness: 0.3 },
   },
   bracers: {
     id: 'bracers', name: 'Bracers', kind: 'armor', slot: 'arms', order: 12,
     cover: [{ parts: ['forearm'], from: 0.2, to: 0.9, flare: [0, 0.004] }],
-    offset: 0.006, thickness: 0.006, rimSharpness: 3, rigidity: 0.9, conform: 0, hidesBody: true,
+    offset: 0.009, thickness: 0.006, rimSharpness: 3, rigidity: 0.9, conform: 0, hidesBody: true,
     material: { color: '#8e969f', metalness: 0.85, roughness: 0.35 },
   },
   greaves: {
@@ -174,7 +191,7 @@ export const LAYER_LIBRARY: Record<string, LayerDef> = {
       { parts: ['head'], from: 0.6 },
       { parts: ['head'], from: 0.15, facing: 'back' },
     ],
-    offset: 0.014, thickness: 0.008, rimSharpness: 3, rigidity: 1, conform: 0.05, hidesBody: true,
+    offset: 0.017, thickness: 0.008, rimSharpness: 3, rigidity: 1, conform: 0.05, hidesBody: true,
     surfaceNoise: 0.0004,
     material: { color: '#a0a8b2', metalness: 0.9, roughness: 0.3 },
   },
@@ -186,6 +203,8 @@ export const LAYER_LIBRARY: Record<string, LayerDef> = {
     ],
     offset: 0.024, thickness: 0.012, rimSharpness: 3, rigidity: 1, conform: 0, hidesBody: true,
     surfaceNoise: 0.002,
+    extras: [{ kind: 'spike', cover: [{ parts: ['upperarm'], to: 0.42 }], density: 0.7, size: 0.075, seed: 11, max: 6 }],
+    extraMaterial: { color: '#a89c86', metalness: 0.5, roughness: 0.5 },
     material: { color: '#6d5a48', metalness: 0.4, roughness: 0.6 },
   },
 };
@@ -348,6 +367,10 @@ export function buildLayerShells(cage: Cage, layers: LayerDef[], scale: number):
 
     const tags = new Array(faces.length).fill(shells.length);
     shells.push({ def, mesh: PolyMesh.fromFaces(S, data, faces, tags, creases), cageFaces: selected });
+    if (def.extras?.length) {
+      const ex = buildExtras(def, body, selected, local, weights, normals, faceNZ, cage, outer, scale);
+      if (ex) shells.push(ex);
+    }
     if (def.hidesBody) for (const f of selected) covered[f] = 1;
   }
 
@@ -469,4 +492,102 @@ function dropFaces(body: PolyMesh, selected: number[], density: number, seed: nu
     else alive.add(f);
   }
   return selected.filter((f) => alive.has(f));
+}
+
+const norm3 = (v: number[]) => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+};
+const cross3 = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+/**
+ * Spikes, horns and studs as separate closed shells (not subdivided), placed on the outer surface
+ * of the covered cage faces and skinned with the averaged weights of that face, so they move with the piece.
+ */
+function buildExtras(
+  def: LayerDef, body: PolyMesh, selected: number[], local: Map<number, number>, weights: Float64Array,
+  normals: Float64Array, faceNZ: Float64Array, cage: Cage, outer: Float64Array, scale: number,
+): LayerShell | null {
+  const S = body.stride;
+  const verts: number[][] = [];
+  const faces: number[][] = [];
+  for (const ex of def.extras!) {
+    const rng = new Rng(ex.seed);
+    const cand = selected.filter((f) => ex.cover.some((r) => matchesRule(r, cage.faceInfo[f], faceNZ[f])));
+    let count = 0;
+    for (const f of cand) {
+      if (count >= (ex.max ?? 16)) break;
+      if (rng.next() >= ex.density) continue;
+      count++;
+      const fv = body.face(f);
+      const c = [0, 0, 0];
+      const n = [0, 0, 0];
+      const w = new Float64Array(BONE_COUNT);
+      for (const v of fv) {
+        const i = local.get(v)!;
+        for (let a = 0; a < 3; a++) {
+          c[a] += (body.data[v * S + a] + normals[v * 3 + a] * outer[i]) / fv.length;
+          n[a] += normals[v * 3 + a];
+        }
+        for (let b = 0; b < BONE_COUNT; b++) w[b] += weights[i * BONE_COUNT + b] / fv.length;
+      }
+      const nn = norm3(n);
+      const ref = Math.abs(nn[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+      const t1 = norm3(cross3(nn, ref));
+      const t2 = cross3(nn, t1);
+      const h = ex.size * scale * rng.range(0.8, 1.2);
+      const r = (ex.kind === 'stud' ? ex.size * 0.9 : ex.size * 0.26) * scale;
+      const sink = 0.004 * scale;
+      const up = [0, 1, 0];
+      const d = nn[0] * up[0] + nn[1] * up[1] + nn[2] * up[2];
+      const bend = norm3([up[0] - nn[0] * d, up[1] - nn[1] * d, up[2] - nn[2] * d]);
+      // rings: [height fraction, radius fraction]
+      const rings: [number, number][] = ex.kind === 'horn' ? [[0, 1], [0.35, 0.78], [0.7, 0.45]] : ex.kind === 'stud' ? [[0, 1], [0.8, 0.8]] : [[0, 1]];
+      const hh = ex.kind === 'stud' ? h * 0.6 : h;
+      const base = verts.length;
+      const addV = (p: number[]) => {
+        const row = new Array(S).fill(0);
+        row[0] = p[0]; row[1] = p[1]; row[2] = p[2];
+        for (let b = 0; b < BONE_COUNT; b++) row[3 + b] = w[b];
+        verts.push(row);
+      };
+      for (const [s, rf] of rings) {
+        const curve = ex.kind === 'horn' ? 0.55 * hh * s * s : 0;
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+          const ca = Math.cos(a) * r * rf;
+          const sa = Math.sin(a) * r * rf;
+          addV([0, 1, 2].map((q) => c[q] - nn[q] * sink + nn[q] * hh * s + bend[q] * curve + t1[q] * ca + t2[q] * sa));
+        }
+      }
+      const tipS = ex.kind === 'stud' ? 0.8 : 1;
+      const tipCurve = ex.kind === 'horn' ? 0.55 * hh : 0;
+      const stud = ex.kind === 'stud';
+      const tipPos = [0, 1, 2].map((q) => c[q] - nn[q] * sink + nn[q] * hh * tipS + bend[q] * tipCurve);
+      const nr = rings.length;
+      for (let ri = 0; ri + 1 < nr; ri++) {
+        for (let k = 0; k < 4; k++) {
+          const k2 = (k + 1) % 4;
+          faces.push([base + ri * 4 + k, base + ri * 4 + k2, base + (ri + 1) * 4 + k2, base + (ri + 1) * 4 + k]);
+        }
+      }
+      const top = base + (nr - 1) * 4;
+      if (stud) faces.push([top, top + 1, top + 2, top + 3]);
+      else {
+        addV(tipPos);
+        const tip = verts.length - 1;
+        for (let k = 0; k < 4; k++) faces.push([top + k, top + ((k + 1) % 4), tip]);
+      }
+      faces.push([base + 3, base + 2, base + 1, base]);
+    }
+  }
+  if (!faces.length) return null;
+  const data = new Float64Array(verts.length * S);
+  verts.forEach((row, i) => data.set(row, i * S));
+  const xdef: LayerDef = {
+    ...def, id: `${def.id}-x`, name: `${def.name} extras`, thickness: 0, rimSharpness: 0, subdivisionDelta: -9,
+    surfaceNoise: undefined, holes: undefined, extras: undefined, hidesBody: false, conform: 0,
+    material: def.extraMaterial ?? { color: '#2a2a2e', metalness: 0.8, roughness: 0.4 },
+  };
+  return { def: xdef, mesh: PolyMesh.fromFaces(S, data, faces, new Array(faces.length).fill(0), []), cageFaces: [] };
 }

@@ -17,3 +17,4 @@ export const RARITY_COLORS: Record<Rarity, string> = {
   legendary: '#e08a2e',
   divine: '#ff4a3a',
 };
+export { ESSENCE_KINDS, ESSENCE_INFO, DYES, infuseItem, type EssenceKind } from './essence';

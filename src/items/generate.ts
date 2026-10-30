@@ -17,8 +17,8 @@ const RARITY_ORDER: Rarity[] = ['broken', 'common', 'magic', 'rare', 'legendary'
 const RARITY_WEIGHT: Record<Rarity, number> = { broken: 12, common: 45, magic: 28, rare: 11, legendary: 3.5, divine: 0.5 };
 const RARITY_MULT: Record<Rarity, number> = { broken: 0.5, common: 1, magic: 1.2, rare: 1.45, legendary: 1.8, divine: 2.3 };
 
-interface Theme { key: string; prefix: string; suffix: string; element?: ItemElement; material?: 'gold' | 'rust'; stat: string; words: string[] }
-const THEMES: Theme[] = [
+export interface Theme { key: string; prefix: string; suffix: string; element?: ItemElement; material?: 'gold' | 'rust'; stat: string; words: string[] }
+export const THEMES: Theme[] = [
   { key: 'fire', prefix: 'Flaming', suffix: 'of Flame', element: 'fire', stat: 'Fire Damage', words: ['Ember', 'Cinder', 'Ash', 'Pyre', 'Blaze'] },
   { key: 'frost', prefix: 'Frozen', suffix: 'of Frost', element: 'frost', stat: 'Cold Damage', words: ['Rime', 'Glacier', 'Winter', 'Hoar', 'Icicle'] },
   { key: 'gold', prefix: 'Gilded', suffix: 'of Gold', material: 'gold', stat: 'Gold Find', words: ['Sun', 'Aurum', 'Dawn', 'Halo'] },
@@ -45,6 +45,9 @@ function pickRarity(rng: Rng): Rarity {
   return 'common';
 }
 const pick = <T,>(rng: Rng, a: T[]): T => a[Math.floor(rng.next() * a.length) % a.length];
+
+export const defaultMaterial = (slot: ItemSlot, baseType: string): ItemTheme['material'] =>
+  slot === 'weapon' ? 'steel' : ['Hood', 'Tunic', 'Robe', 'Gloves', 'Belt', 'Trousers', 'Boots'].includes(baseType) ? 'leather' : 'iron';
 
 export function generateItem(seed: number, opts: { slot?: ItemSlot; rarity?: Rarity; level?: number } = {}): Item {
   const rng = new Rng(seed ^ 0x51ed270b);

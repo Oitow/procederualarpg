@@ -1,4 +1,4 @@
-import { ITEM_SLOTS, RARITY_COLORS, type Item, type ItemSlot } from '../items';
+import { DYES, ESSENCE_INFO, ESSENCE_KINDS, ITEM_SLOTS, RARITY_COLORS, infuseItem, type EssenceKind, type Item, type ItemSlot } from '../items';
 
 export type Equipment = Partial<Record<ItemSlot, Item>>;
 
@@ -56,6 +56,8 @@ function esc(s: string) {
 export class Inventory {
   bag: Item[] = [];
   equipped: Equipment = {};
+  /** Essence stock; the game calls addEssence(kind, n) on drops. */
+  essences: Record<EssenceKind, number> = { fire: 0, frost: 0, hell: 0, divine: 0, shadow: 0, rust: 0 };
   /** Called whenever the equipment changed (rebuild the hero). */
   onEquipmentChange: (eq: Equipment) => void = () => {};
   private open = false;
@@ -102,6 +104,17 @@ export class Inventory {
     this.bag.push(item);
     this.updateCount();
     if (this.open) this.render();
+  }
+
+  addEssence(kind: EssenceKind, n = 1) {
+    this.essences[kind] = Math.max(0, (this.essences[kind] ?? 0) + n);
+    if (this.open) this.render();
+  }
+
+  /** Item was modified in place (infusion / dye): refresh and rebuild the hero if it is worn. */
+  private modified(item: Item) {
+    if (this.equipped[item.slot] === item) this.changed();
+    else this.render();
   }
 
   private updateCount() {
@@ -155,7 +168,17 @@ export class Inventory {
     else if (act === 'filter') this.filter = el.dataset.k as ItemSlot | 'all';
     else if (act === 'equip' && sel) return this.equip(sel.item);
     else if (act === 'unequip' && sel) return this.unequip(sel.item);
-    else if (act === 'drop' && sel && sel.from === 'bag') return this.drop(sel.item);
+    else if (act === 'infuse' && sel) {
+      const k = el.dataset.k as EssenceKind;
+      if ((this.essences[k] ?? 0) < 1) return;
+      this.essences[k]--;
+      Object.assign(sel.item, infuseItem(sel.item, k));
+      return this.modified(sel.item);
+    } else if (act === 'dye' && sel) {
+      if (el.dataset.k) sel.item.dye = el.dataset.k;
+      else delete sel.item.dye;
+      return this.modified(sel.item);
+    } else if (act === 'drop' && sel && sel.from === 'bag') return this.drop(sel.item);
     this.render();
   }
 
@@ -168,6 +191,17 @@ export class Inventory {
       row('Tempo', String(it.stats.speed ?? 1), (it.stats.speed ?? 1) - (cmp?.stats.speed ?? 0));
     } else row('Rüstung', String(it.stats.armor ?? 0), (it.stats.armor ?? 0) - (cmp?.stats.armor ?? 0), true);
     return rows.join('');
+  }
+
+  private customizeHtml(it: Item) {
+    const ess = ESSENCE_KINDS.map((k) => {
+      const n = this.essences[k] ?? 0;
+      return `<button class="ess" data-act="infuse" data-k="${k}" style="--ec:${ESSENCE_INFO[k].color}"${n < 1 ? ' disabled' : ''} title="${ESSENCE_INFO[k].label}-Essenz">
+        <i></i><small>${ESSENCE_INFO[k].label}</small><b>${n}</b></button>`;
+    }).join('');
+    const dyes = DYES.map((d) => `<button class="dye${it.dye === d.color ? ' on' : ''}" data-act="dye" data-k="${d.color}" style="background:${d.color}" title="${d.name}" aria-label="${d.name}"></button>`).join('');
+    return `<div class="custom"><h5>Essenz einflößen <small>ändert Name, Affix &amp; Aussehen</small></h5><div class="ess-row">${ess}</div>
+      <h5>Färben <small>Stoff &amp; Leder</small></h5><div class="dye-row">${dyes}<button class="dye none${it.dye ? '' : ' on'}" data-act="dye" aria-label="Keine Farbe">✕</button></div></div>`;
   }
 
   private render() {
@@ -220,7 +254,7 @@ export class Inventory {
         <p class="sub">${esc(it.rarity)} ${esc(it.baseType)} · Stufe ${it.level}</p></div></div>
         <ul class="stats">${this.statRows(it, cmp)}</ul>${aff ? `<ul class="affixes">${aff}</ul>` : ''}${note}
         <div class="btns"><button class="act" data-act="${sel.from === 'slot' ? 'unequip' : 'equip'}">${sel.from === 'slot' ? 'Ablegen' : 'Anlegen'}</button>
-        ${sel.from === 'bag' ? '<button class="act drop" data-act="drop">Wegwerfen</button>' : ''}</div>`;
+        ${sel.from === 'bag' ? '<button class="act drop" data-act="drop">Wegwerfen</button>' : ''}</div>${this.customizeHtml(it)}`;
     }
     this.panel.innerHTML = `<header><b>Inventar</b><button class="x" data-act="close" aria-label="Schließen">✕</button></header>
       <div class="inv-body"><div class="inv-col"><h4>Ausrüstung</h4>${doll}${summary}</div>

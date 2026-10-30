@@ -26,7 +26,11 @@ import {
   WebGLRenderer,
 } from 'three';
 import { PoseBlender, applyExtras, attackPose, buildCharacter, gaitCadence, gaitClip, makeParams, samplePose, type CharacterModel } from '../character';
-import { RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
+import type { LayerDef } from '../character/layers';
+import { hairLayers } from '../character/hair';
+import { openCreator } from './creator';
+import { Rng } from '../character/rng';
+import { ESSENCE_KINDS, RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
 import { Inventory, type Equipment } from './inventory';
 import { Combat } from './combat';
 import { Hud } from './hud';
@@ -93,7 +97,10 @@ const spawn = world.findSpawn();
 world.update(spawn, 25);
 
 // player
-const heroParams = makeParams({ seed, variation: 0.6, detail: { subdivisions: 1 } });
+let heroParams = makeParams({ seed, variation: 0.6, detail: { subdivisions: 1 } });
+let lookLayers: LayerDef[] = [];
+/** True while the character creator overlay is open (pauses input + combat). */
+let creating = true;
 let hero: CharacterModel = buildCharacter(heroParams, { layers: [] });
 hero.group.position.copy(spawn);
 scene.add(hero.group);
@@ -114,7 +121,7 @@ function rebuildHero(eq: Equipment) {
   const layers = Object.values(eq)
     .filter((i): i is Item => !!i && i.slot !== 'weapon')
     .flatMap((i) => itemToLayers(i));
-  const next = buildCharacter(heroParams, { layers });
+  const next = buildCharacter(heroParams, { layers: [...lookLayers, ...layers] });
   next.group.position.copy(old.group.position);
   next.group.rotation.copy(old.group.rotation);
   scene.remove(old.group);
@@ -147,6 +154,23 @@ combat.onHeroHit = () => hud.flashHit();
 
 // inventory + starting bag
 const inventory = new Inventory();
+
+// character creator as start screen; the hero keeps its equipment when re-created
+function startCreator() {
+  creating = true;
+  openCreator(null, (p, look) => {
+    heroParams = { ...p, detail: { ...p.detail, subdivisions: 1 } };
+    lookLayers = hairLayers(look.hair, look.hairColor, p.seed, look.beard);
+    rebuildHero(currentEq);
+    creating = false;
+  });
+}
+startCreator();
+
+// essences: a starter set to try infusion, plus a chance per kill
+for (const k of ESSENCE_KINDS) inventory.addEssence(k, 2);
+let lastKills = 0;
+const essenceRng = new Rng(seed ^ 0x5eed);
 inventory.onEquipmentChange = rebuildHero;
 const startSpecs: [number, ItemSlot, Parameters<typeof generateItem>[1]?][] = [
   [11, 'weapon', { rarity: 'rare' }], [12, 'weapon', { rarity: 'divine', level: 20 }], [13, 'head', { rarity: 'broken' }],
@@ -262,7 +286,7 @@ function setTarget(x: number, y: number, showMarker: boolean) {
 const canvas = renderer.domElement;
 canvas.style.touchAction = 'none';
 canvas.addEventListener('pointerdown', (e) => {
-  if (inventory.isOpen()) return;
+  if ((creating || inventory.isOpen())) return;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
   if (pointers.size === 1) {
@@ -345,7 +369,7 @@ function frame() {
   let wantSpeed = 0;
   const kx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
   const kz = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
-  if (inventory.isOpen() || combat.dead) {
+  if ((creating || inventory.isOpen()) || combat.dead) {
     target = null;
     steering = false;
   } else if (kx || kz) {
@@ -428,7 +452,12 @@ function frame() {
   yS = Math.abs(yT - yS) > 1.5 ? yT : yS + (yT - yS) * Math.min(1, dt * 14);
   pos.y = yS;
 
-  const cf = combat.update(inventory.isOpen() ? 0 : dt, pos, moving);
+  if (combat.kills > lastKills) {
+    for (let k = lastKills; k < combat.kills; k++)
+      if (essenceRng.next() < 0.35) inventory.addEssence(ESSENCE_KINDS[Math.floor(essenceRng.next() * ESSENCE_KINDS.length)], 1);
+    lastKills = combat.kills;
+  }
+  const cf = combat.update((creating || inventory.isOpen()) ? 0 : dt, pos, moving);
   if (cf.respawn) {
     pos.copy(spawn);
     yS = spawn.y;

@@ -4,7 +4,7 @@ import { buildLayerShells } from '../src/character/layers';
 import { makeParams, resolveParams } from '../src/character/params';
 import { analyzeTopology } from '../src/character/polymesh';
 import { buildRig } from '../src/character/rig';
-import { ITEM_SLOTS, buildWeaponMesh, generateItem, itemToLayers } from '../src/items';
+import { DYES, ESSENCE_KINDS, ITEM_SLOTS, buildWeaponMesh, generateItem, infuseItem, itemToLayers } from '../src/items';
 
 describe('procedural items', () => {
   it('is deterministic', () => {
@@ -56,5 +56,31 @@ describe('procedural items', () => {
       expect(tris).toBeLessThan(1500);
       (w.userData.update as (dt: number) => void)(0.016);
     }
+  });
+
+  it('essence infusion keeps names and visuals in sync, extras and dye stay closed shells', () => {
+    const params = resolveParams(makeParams());
+    const rig = buildRig(params);
+    const cage = buildCage(rig, params);
+    let extras = 0;
+    for (let s = 0; s < 40; s++) {
+      const slot = ITEM_SLOTS[s % 9];
+      const k = ESSENCE_KINDS[s % ESSENCE_KINDS.length];
+      const it = infuseItem(generateItem(s + 100, { slot }), k);
+      expect(it.theme?.broken).toBeFalsy();
+      expect(it.affixes.length).toBeLessThanOrEqual(3);
+      if (it.rarity === 'magic' && k === 'fire') expect(it.theme?.element).toBe('fire');
+      if (it.name.includes('of Hell')) expect(it.theme?.element).toBe('hell');
+      it.dye = DYES[s % DYES.length].color;
+      if (slot === 'weapon') { buildWeaponMesh(it); continue; }
+      const { shells } = buildLayerShells(cage, itemToLayers(it), rig.scale);
+      for (const sh of shells) {
+        if (sh.def.id.endsWith('-x')) extras++;
+        const tp = analyzeTopology(sh.mesh);
+        expect(tp.boundaryEdges, it.name).toBe(0);
+        expect(tp.nonManifoldEdges, it.name).toBe(0);
+      }
+    }
+    expect(extras).toBeGreaterThan(0);
   });
 });

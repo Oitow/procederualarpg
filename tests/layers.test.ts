@@ -17,7 +17,7 @@ describe('clothing & armour layers', () => {
     const { rig, cage } = setup();
     for (const def of Object.values(LAYER_LIBRARY)) {
       const { shells } = buildLayerShells(cage, [def], rig.scale);
-      expect(shells, def.id).toHaveLength(1);
+      expect(shells.filter((s) => !s.def.id.endsWith('-x')), def.id).toHaveLength(1);
       const t = analyzeTopology(shells[0].mesh);
       expect(t.boundaryEdges, def.id).toBe(0);
       expect(t.flippedEdges, def.id).toBe(0);
@@ -57,7 +57,7 @@ describe('clothing & armour layers', () => {
   it('generates every outfit end-to-end', () => {
     for (const [name, layers] of Object.entries(OUTFITS)) {
       const data = generateCharacterData(makeParams({ detail: { subdivisions: 1 } }), { layers });
-      expect(data.layers.length, name).toBe(layers.length);
+      expect(data.layers.filter((l) => !l.def.id.endsWith('-x')).length, name).toBe(layers.length);
       expect(data.stats.bodyTriangles).toBeGreaterThan(0);
     }
   });

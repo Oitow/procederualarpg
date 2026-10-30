@@ -1,5 +1,5 @@
 import { Color } from 'three';
-import { LAYER_LIBRARY, type CoverRule, type LayerDef } from '../character/layers';
+import { LAYER_LIBRARY, type CoverRule, type LayerDef, type LayerExtra } from '../character/layers';
 import { Rng } from '../character/rng';
 import type { Item } from './types';
 
@@ -84,6 +84,24 @@ const TINT: Record<string, [string, string | undefined]> = {
   shadow: ['#2c2638', '#6a3cff'],
 };
 
+/** Spikes / horns / studs for hell, barbarian-style and rare+ pieces (skinned with the shell). */
+function extrasFor(item: Item, rar: number, hell: boolean): { extras: LayerExtra[]; mat: { color: string; metalness: number; roughness: number; emissive?: string; emissiveIntensity?: number } } | undefined {
+  const t = item.baseType;
+  const seed = item.seed ^ 0x5eed;
+  const ex: LayerExtra[] = [];
+  const kind = hell ? 'horn' : 'spike';
+  const sz = 0.05 + rar * 0.008 + (hell ? 0.02 : 0);
+  if (t === 'Pauldrons' && (hell || rar >= 3)) ex.push({ kind, cover: [{ parts: ['upperarm'], to: 0.4 }], density: 0.6, size: sz, seed, max: 6 });
+  else if (t === 'Helm' && (hell || rar >= 4)) {
+    ex.push({ kind: 'horn', cover: [{ parts: ['head'], from: 0.72, to: 0.9, side: 'L' }], density: 1, size: sz + 0.04, seed, max: 1 });
+    ex.push({ kind: 'horn', cover: [{ parts: ['head'], from: 0.72, to: 0.9, side: 'R' }], density: 1, size: sz + 0.04, seed: seed + 1, max: 1 });
+  } else if (t === 'Breastplate' && rar >= 2) ex.push({ kind: hell ? 'spike' : 'stud', cover: [{ parts: ['torso'], from: 0.4, to: 0.9, lateralMin: 0.45 }], density: 0.55, size: hell ? 0.035 : 0.012, seed, max: 10 });
+  else if ((t === 'Gauntlets' || t === 'Vambraces' || t === 'Bracers') && (hell || rar >= 3)) ex.push({ kind: hell ? 'spike' : 'stud', cover: [{ parts: ['forearm'], from: 0.3, to: 0.9 }], density: 0.4, size: hell ? 0.035 : 0.012, seed, max: 4 });
+  else if ((t === 'Belt' || t === 'Faulds' || t === 'Sabatons' || t === 'Greaves') && rar >= 2) ex.push({ kind: 'stud', cover: [{ parts: t === 'Belt' || t === 'Faulds' ? ['torso'] : ['shin', 'foot'], from: 0.1 }], density: 0.3, size: 0.011, seed, max: 6 });
+  if (!ex.length) return undefined;
+  return { extras: ex, mat: hell ? { color: '#1a0c0c', metalness: 0.6, roughness: 0.4, emissive: '#ff1a0a', emissiveIntensity: 0.5 } : { color: rar >= 3 ? '#c9a23a' : '#6e6a64', metalness: 0.9, roughness: 0.35 } };
+}
+
 export function itemToLayers(item: Item): LayerDef[] {
   if (item.slot === 'weapon') return [];
   const base = BASES[item.baseType] ?? BASES.Helm;
@@ -97,6 +115,7 @@ export function itemToLayers(item: Item): LayerDef[] {
   if (!base.metal && th.material !== 'gold' && th.material !== 'rust') metalness = Math.min(metalness, 0.2);
   if (!base.metal && th.material === 'iron') { color = CLOTH_PAL[Math.floor(rng.next() * CLOTH_PAL.length)]; roughness = 0.92; }
   color = jitter(color, rng);
+  if (item.dye && !base.metal && !th.broken) color = jitter(item.dye, rng, 0.006, 0.025);
   let emissive: string | undefined;
   let emissiveIntensity = 0;
   let accent: string | undefined; // element / divine glow colour used on the trim
@@ -129,8 +148,10 @@ export function itemToLayers(item: Item): LayerDef[] {
     holes = { density: 0.28, seed: item.seed };
   }
   if (base.crown) holes = { density: 0.34, seed: item.seed }; // crenellated rim = crown points
+  const xt = th.broken ? undefined : extrasFor(item, rar, th.element === 'hell');
   const def: LayerDef = {
     ...lib,
+    ...(xt ? { extras: xt.extras, extraMaterial: xt.mat } : {}),
     id: `item-${item.id}`,
     name: item.name,
     cover: (base.cover ?? lib.cover).map((c) => ({ ...c })),
@@ -150,8 +171,10 @@ export function itemToLayers(item: Item): LayerDef[] {
   if (th.element === 'hell') tColor = '#14090a';
   else if (th.element === 'frost' && rar >= 2) tColor = '#dcecf8';
   else if (th.element === 'shadow') tColor = '#17121f';
+  const dyedTrim = !!item.dye && base.metal && th.element !== 'hell';
+  if (dyedTrim) tColor = item.dye!;
   tColor = jitter(tColor, rng, 0.01, 0.03);
-  const trimMat = {
+  const trimMat = dyedTrim ? { color: tColor, metalness: 0.05, roughness: 0.85 } : {
     color: tColor,
     metalness: metalTrim ? 0.85 : 0.05,
     roughness: metalTrim ? 0.3 : 0.8,

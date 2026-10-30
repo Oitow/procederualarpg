@@ -76,3 +76,17 @@ html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink
   #bag-btn { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (orientation: landscape) and (max-height: 500px) { .cell small { display: none; } .paperdoll { max-width: 260px; } }
+
+.detail .custom { margin-top: 12px; border-top: 1px solid #3a3322; padding-top: 8px; }
+.detail .custom h5 { margin: 6px 0 6px; font: 600 12px system-ui; letter-spacing: 0.08em; color: var(--brass); text-transform: uppercase; }
+.detail .custom h5 small { font-weight: 400; opacity: 0.6; text-transform: none; letter-spacing: 0; margin-left: 4px; }
+.ess-row, .dye-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ess { position: relative; flex: 1 1 28%; min-height: 44px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--ec); border-radius: 6px; background: #14110d; color: #ddd; font: 12px system-ui; touch-action: manipulation; }
+.ess i { width: 12px; height: 12px; border-radius: 50%; background: var(--ec); box-shadow: 0 0 8px var(--ec); flex: none; }
+.ess small { flex: 1; text-align: left; }
+.ess b { font-weight: 700; }
+.ess:disabled { opacity: 0.35; box-shadow: none; }
+.ess:not(:disabled):active { background: #2a2414; }
+.dye { width: 40px; height: 40px; border-radius: 50%; border: 2px solid #3a3322; color: #aaa; font: 14px system-ui; touch-action: manipulation; }
+.dye.on { border-color: var(--brass); box-shadow: 0 0 0 2px #0008 inset, 0 0 6px var(--brass); }
+.dye.none { background: #14110d; }

@@ -3,6 +3,7 @@ import {
   AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry,   Group, IcosahedronGeometry, Matrix4, Mesh, MeshStandardMaterial, OctahedronGeometry, Points, PointsMaterial,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Quaternion, Vector3 } from 'three';
 import { Rng } from '../character/rng';
 import type { Item } from './types';
 
@@ -26,6 +27,31 @@ const blade = (y0: number, len: number, w: number, t: number, tipFrac = 0.18): P
   return [b, tip];
 };
 
+/** Blade bent along +X (scimitar / kris): segmented tapered prisms following an arc. */
+const curvedBlade = (y0: number, len: number, w: number, t: number, curve: number, segs = 6): Part[] => {
+  const out: Part[] = [];
+  const sl = len / segs;
+  let x = 0;
+  let y = y0;
+  for (let i = 0; i < segs; i++) {
+    const th = curve * ((i + 0.5) / segs);
+    const w0 = w * (1 - 0.85 * (i / segs) ** 1.6);
+    const w1 = w * (1 - 0.85 * ((i + 1) / segs) ** 1.6);
+    const seg = new CylinderGeometry(Math.max(w1, 0.004), w0, sl * 1.04, 4, 1);
+    out.push(place(seg, x + Math.sin(th) * sl * 0.5, y + Math.cos(th) * sl * 0.5, 0, 1, 1, t / w0, -th));
+    x += Math.sin(th) * sl;
+    y += Math.cos(th) * sl;
+  }
+  return out;
+};
+/** Cone pointing along `dir` from `pos`. */
+const spikeAt = (pos: Vector3, dir: Vector3, len: number, rad: number): Part => {
+  const g = new ConeGeometry(rad, len, 4, 1);
+  g.translate(0, len / 2, 0);
+  g.applyMatrix4(new Matrix4().compose(pos, new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), dir.clone().normalize()), new Vector3(1, 1, 1)));
+  return g;
+};
+
 interface Look { color: Color; metalness: number; roughness: number; emissive: Color | null; intensity: number; hilt: Color; particle: Color | null }
 
 function look(item: Item): Look {
@@ -43,6 +69,7 @@ function look(item: Item): Look {
     L.intensity = 0.8 + th.glow * 1.4; // divine: > 1.5 for bloom
     L.particle = L.particle ?? new Color('#ffe9a0');
   }
+  if (item.dye) L.hilt.set(item.dye);
   if (th.broken) { L.color.set('#6b4a35'); L.metalness = 0.4; L.roughness = 0.95; L.emissive = null; L.intensity = 0; L.particle = null; L.hilt.set('#3a2a1e'); }
   return L;
 }
@@ -70,18 +97,46 @@ export function buildWeaponMesh(item: Item): Group {
       const bit = (dir: number) =>
         place(new CylinderGeometry(h / 2, 0.02, bl, 4, 1), dir * (0.02 + bl / 2), top - h * 0.35, 0, 1, 1, 0.1 / (h / 2), -dir * Math.PI / 2);
       head.push(bit(1));
-      if (rng.next() < 0.5 && !broken) head.push(bit(-1));
+      const ax = Math.floor(rng.next() * 3);
+      if (ax === 0 && !broken) head.push(bit(-1)); // double bit
       else head.push(place(new ConeGeometry(0.03, 0.14, 4, 1), 0, top + 0.07, 0));
+      if (ax === 1 && !broken) { // bearded axe: hooked lower edge
+        head.push(place(new CylinderGeometry(h * 0.3, 0.02, bl * 0.8, 4, 1), (0.02 + bl * 0.4), top - h * 0.95, 0, 1, 1, 0.1 / (h * 0.3), -Math.PI / 2));
+        head.push(place(new ConeGeometry(0.025, 0.1, 4, 1), bl * 0.75, top - h * 1.2, 0, 1, 1, 1, Math.PI));
+      }
+      if (ax === 2) hilt.push(place(new ConeGeometry(0.022, 0.09, 6, 1), 0, -0.36, 0, 1, 1, 1, Math.PI)); // butt spike
       tipY = top + 0.14;
       start = top - h;
     } else {
       const r = rng.range(0.07, 0.1) * (broken ? 0.8 : 1);
-      head.push(place(new IcosahedronGeometry(r, 0), 0, top + r * 0.6, 0));
-      const n = 6 + Math.floor(rng.next() * 3);
-      for (let i = 0; i < n; i++) {
-        if (broken && i % 3 === 0) continue;
-        const a = (i / n) * Math.PI * 2;
-        head.push(place(new BoxGeometry(0.1, 0.12, 0.012), Math.cos(a) * r * 0.9, top + r * 0.6, Math.sin(a) * r * 0.9, 1, 1, 1, 0, -a));
+      const mk = Math.floor(rng.next() * 3);
+      const c = new Vector3(0, top + r * 0.6, 0);
+      if (mk === 1) { // morning star: ball with spikes on every icosahedron vertex
+        head.push(place(new IcosahedronGeometry(r, 1), 0, c.y, 0));
+        const ico = new IcosahedronGeometry(1, 0).getAttribute('position');
+        for (let i = 0; i < ico.count; i += 3) {
+          if (broken && i % 9 === 0) continue;
+          const d = new Vector3(ico.getX(i), ico.getY(i), ico.getZ(i));
+          head.push(spikeAt(c.clone().addScaledVector(d.clone().normalize(), r * 0.85), d, r * 0.8, r * 0.28));
+        }
+      } else if (mk === 2) { // flanged column with collar and top spike
+        head.push(place(new CylinderGeometry(r * 0.55, r * 0.7, r * 2.1, 8, 1), 0, c.y, 0));
+        head.push(place(new CylinderGeometry(r * 0.85, r * 0.85, 0.02, 8, 1), 0, c.y - r * 1.1, 0));
+        const n = 4 + (rng.next() < 0.5 ? 2 : 0);
+        for (let i = 0; i < n; i++) {
+          if (broken && i % 3 === 0) continue;
+          const a = (i / n) * Math.PI * 2;
+          head.push(place(new BoxGeometry(r * 1.0, r * 1.8, 0.014), Math.cos(a) * r * 0.9, c.y, Math.sin(a) * r * 0.9, 1, 1, 1, 0, -a));
+        }
+        head.push(spikeAt(new Vector3(0, c.y + r * 1.0, 0), new Vector3(0, 1, 0), r * 1.1, r * 0.35));
+      } else {
+        head.push(place(new IcosahedronGeometry(r, 0), 0, c.y, 0));
+        const n = 6 + Math.floor(rng.next() * 3);
+        for (let i = 0; i < n; i++) {
+          if (broken && i % 3 === 0) continue;
+          const a = (i / n) * Math.PI * 2;
+          head.push(place(new BoxGeometry(0.1, 0.12, 0.012), Math.cos(a) * r * 0.9, c.y, Math.sin(a) * r * 0.9, 1, 1, 1, 0, -a));
+        }
       }
       tipY = top + r * 1.6;
       start = top - r;
@@ -98,7 +153,20 @@ export function buildWeaponMesh(item: Item): Group {
     if (style === 2) for (const s of [-1, 1]) hilt.push(place(new BoxGeometry(0.03, 0.06, 0.035), s * gw, gh - 0.02, 0));
     const len = (dagger ? 0.32 : rng.range(0.68, 0.85)) * (broken ? 0.55 : 1);
     const w = (dagger ? 0.028 : rng.range(0.032, 0.055)) * (rng.next() < 0.3 ? 1.4 : 1);
-    head.push(...blade(gh + 0.025, len, w, 0.012, broken ? 0.05 : 0.18));
+    const bs = broken ? 0 : Math.floor(rng.next() * 4);
+    const y0 = gh + 0.025;
+    if (dagger) {
+      if (bs === 1) head.push(...curvedBlade(y0, len, w * 1.1, 0.012, 0.7, 4)); // kris-like curve
+      else if (bs === 2) head.push(...blade(y0, len, w * 1.5, 0.014, 0.45)); // leaf blade
+      else head.push(...blade(y0, len, w, 0.012, 0.18));
+    } else if (bs === 1) head.push(...curvedBlade(y0, len, w * 1.15, 0.012, 0.55)); // scimitar
+    else if (bs === 2) { // serrated back edge
+      head.push(...blade(y0, len, w, 0.012, 0.15));
+      for (let i = 1; i < 7; i++) head.push(place(new ConeGeometry(0.012, 0.035, 3, 1), -w * (1 - (i / 8) * 0.3) , y0 + (len * 0.85 * i) / 7, 0, 1, 1, 1, Math.PI / 2));
+    } else if (bs === 3) { // broadsword with fuller
+      head.push(...blade(y0, len, w * 1.5, 0.014, 0.22));
+      head.push(place(new BoxGeometry(w * 0.35, len * 0.7, 0.02), 0, y0 + len * 0.4, 0));
+    } else head.push(...blade(y0, len, w, 0.012, broken ? 0.05 : 0.18));
     if (broken) head.push(place(new BoxGeometry(w * 0.7, 0.04, 0.012), w * 0.35, gh + 0.025 + len + 0.01, 0, 1, 1, 1, 0.5));
     start = gh + 0.025;
     tipY = start + len;

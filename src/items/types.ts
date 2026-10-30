@@ -32,4 +32,8 @@ export interface Item {
   affixes: Affix[];
   stats: Record<string, number>; // e.g. { damageMin, damageMax, armor }
   theme?: ItemTheme;
+  /** Dye colour (hex) for cloth / leather parts; set via the inventory. */
+  dye?: string;
+  /** Essences this item has been infused with (oldest first). */
+  infused?: string[];
 }
