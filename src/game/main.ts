@@ -25,7 +25,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { PoseBlender, attackPose, buildCharacter, gaitCadence, gaitClip, makeParams, samplePose, type CharacterModel } from '../character';
+import { PoseBlender, applyExtras, attackPose, buildCharacter, gaitCadence, gaitClip, makeParams, samplePose, type CharacterModel } from '../character';
 import { RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
 import { Inventory, type Equipment } from './inventory';
 import { Combat } from './combat';
@@ -67,6 +67,8 @@ scene.add(torch);
 const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 const ISO_OFFSET = new Vector3(1, 1.15, 1).normalize().multiplyScalar(60);
 let zoom = 16; // visible world height in meters
+const ZMIN = mobile ? 10 : 8; // portrait phones: closer than this crops the world to a sliver
+const ZMAX = mobile ? 24 : 30;
 function resize() {
   const w = innerWidth;
   const h = innerHeight;
@@ -129,8 +131,8 @@ function rebuildHero(eq: Equipment) {
     if (hand) {
       weapon = new Group();
       const w = buildWeaponMesh(eq.weapon);
-      // blade (+Y) -> forward (+Z) and slightly up (-Y along the hand)
-      w.rotation.x = Math.PI / 2 + 0.5;
+      // blade (+Y) -> hand-local +Z (forward) tilted 17 deg toward the wrist
+      w.rotation.x = Math.PI / 2 + 0.3; // blade elevation = total hand flex + 17 deg (see attackPose)
       w.position.set(0, 0.04, 0.02);
       weapon.add(w);
       weapon.userData.update = (dt: number) => w.userData.update?.(dt);
@@ -213,12 +215,17 @@ function spawnDrop(item: Item, x: number, z: number) {
 
 resize();
 
-// click marker
-const marker = new Mesh(
-  new RingGeometry(0.25, 0.4, 24).rotateX(-Math.PI / 2),
-  new MeshBasicMaterial({ color: '#c9a45a', transparent: true, opacity: 0, depthWrite: false }),
-);
+// click marker: steady inner ring + expanding pulse ring
+const markerMat = new MeshBasicMaterial({ color: '#d9b266', transparent: true, opacity: 0, depthWrite: false });
+const pulseMat = new MeshBasicMaterial({ color: '#f0cf85', transparent: true, opacity: 0, depthWrite: false });
+const marker = new Group();
+const markerIn = new Mesh(new RingGeometry(0.2, 0.3, 24).rotateX(-Math.PI / 2), markerMat);
+const markerPulse = new Mesh(new RingGeometry(0.36, 0.42, 32).rotateX(-Math.PI / 2), pulseMat);
+marker.add(markerIn, markerPulse);
 scene.add(marker);
+let markerA = 0;
+let markerAge = 0;
+let markerOn = false;
 
 document.getElementById('region')!.textContent = regionName(seed);
 document.getElementById('seed')!.textContent = `Seed ${seed}`;
@@ -245,8 +252,10 @@ function setTarget(x: number, y: number, showMarker: boolean) {
   if (!p) return;
   target = p;
   if (showMarker) {
-    marker.position.set(p.x, p.y + 0.05, p.z);
-    (marker.material as MeshBasicMaterial).opacity = 1;
+    marker.position.set(p.x, p.y + 0.06, p.z);
+    markerAge = 0;
+    markerOn = true;
+    markerA = 1;
   }
 }
 
@@ -273,7 +282,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
-    zoom = Math.min(30, Math.max(8, (zoomStart * pinchStart) / Math.max(d, 1)));
+    zoom = Math.min(ZMAX, Math.max(ZMIN, (zoomStart * pinchStart) / Math.max(d, 1)));
     resize();
   } else if (steering) setTarget(e.clientX, e.clientY, false);
 });
@@ -284,7 +293,7 @@ const release = (e: PointerEvent) => {
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
 canvas.addEventListener('wheel', (e) => {
-  zoom = Math.min(30, Math.max(8, zoom * (1 + Math.sign(e.deltaY) * 0.1)));
+  zoom = Math.min(ZMAX, Math.max(ZMIN, zoom * (1 + Math.sign(e.deltaY) * 0.1)));
   resize();
 }, { passive: true });
 
@@ -299,21 +308,41 @@ addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 // loop
 // ---------------------------------------------------------------------------
 const timer = new Timer();
-const SPEED = 4.2;
+const MAX_SPEED = 5.2; // run
+const ACCEL = 13; // m/s^2
+const DECEL = 18;
 let walkTime = 0; // gait phase in cycles
 const blender = new PoseBlender(0.2);
 let idleTime = 0;
 let facing = 0;
-const move = new Vector3();
+const vel = new Vector3();
+const dir = new Vector3();
+const dv = new Vector3();
 const camTarget = spawn.clone();
+const lookAhead = new Vector3();
+let speed = 0;
+let yawRate = 0;
+let bank = 0;
+let slopeS = 0;
+let yS = spawn.y;
+let hitT = 9;
+let shake = 0;
+let lastHp = combat.hp;
+let deathT = 0;
+const slopeAt = (x: number, z: number, f: number) => {
+  const fx = Math.sin(f) * 0.35;
+  const fz = Math.cos(f) * 0.35;
+  return [terrain.height(x + fx, z + fz), terrain.height(x - fx, z - fz)] as const;
+};
 
 function frame() {
   timer.update();
   const dt = Math.min(timer.getDelta(), 0.05);
   const pos = hero.group.position;
 
-  // movement intent
-  move.set(0, 0, 0);
+  // movement intent -> desired velocity (speed scales with distance to the touch/tap target)
+  dir.set(0, 0, 0);
+  let wantSpeed = 0;
   const kx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
   const kz = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
   if (inventory.isOpen() || combat.dead) {
@@ -321,20 +350,35 @@ function frame() {
     steering = false;
   } else if (kx || kz) {
     // screen-aligned directions for the 45° iso view
-    move.set(kx + kz, 0, kz - kx).normalize();
+    dir.set(kx + kz, 0, kz - kx).normalize();
+    wantSpeed = MAX_SPEED;
     target = null;
   } else if (target) {
-    move.set(target.x - pos.x, 0, target.z - pos.z);
-    if (move.length() < 0.15) {
+    dir.set(target.x - pos.x, 0, target.z - pos.z);
+    const dist = dir.length();
+    if (dist < 0.12) {
       target = null;
-      move.set(0, 0, 0);
-    } else move.normalize();
+      dir.set(0, 0, 0);
+    } else {
+      dir.divideScalar(dist);
+      wantSpeed = Math.min(MAX_SPEED, 1.7 + (dist - 0.6) * 1.2); // close = walk, far = run
+      wantSpeed = Math.min(wantSpeed, Math.max(0.7, Math.sqrt(2 * DECEL * 0.6 * dist))); // brake into the target
+    }
   }
 
-  const moving = move.lengthSq() > 0;
-  if (moving) {
-    const nx = pos.x + move.x * SPEED * dt;
-    const nz = pos.z + move.z * SPEED * dt;
+  // acceleration / deceleration
+  dv.copy(dir).multiplyScalar(wantSpeed);
+  dv.sub(vel);
+  const dl = dv.length();
+  const maxd = (wantSpeed * wantSpeed >= vel.lengthSq() ? ACCEL : DECEL) * dt;
+  if (dl > maxd) dv.multiplyScalar(maxd / dl);
+  vel.add(dv);
+  const prevSpeed = speed;
+  speed = vel.length();
+
+  if (speed > 0.01) {
+    const nx = pos.x + vel.x * dt;
+    const nz = pos.z + vel.z * dt;
     const r = world.resolve(nx, nz, PLAYER_R, fix);
     const ox = pos.x;
     const oz = pos.z;
@@ -344,52 +388,105 @@ function frame() {
     } else if (terrain.isWalkable(nx, nz) && !r.hit) {
       pos.x = nx;
       pos.z = nz;
-    } else target = null;
+    } else {
+      target = null;
+      vel.set(0, 0, 0);
+    }
     if (target) {
-      const step = SPEED * dt;
-      stuck = Math.hypot(pos.x - ox, pos.z - oz) < step * 0.4 ? stuck + dt : 0;
-      if (stuck > 0.2) {
+      const step = speed * dt;
+      stuck = step > 1e-4 && Math.hypot(pos.x - ox, pos.z - oz) < step * 0.4 ? stuck + dt : 0;
+      if (stuck > 0.25) {
         target = null;
         stuck = 0;
       }
     } else stuck = 0;
-    const want = Math.atan2(move.x, move.z);
+  } else stuck = 0;
+
+  const moving = speed > 0.3;
+  if (moving) {
+    // turn towards the velocity direction; yaw rate drives the lean
+    const want = Math.atan2(vel.x, vel.z);
     let d = want - facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    facing += d * Math.min(1, dt * 12);
-    hero.group.rotation.y = facing;
-    walkTime += dt * gaitCadence(SPEED, hero.data.rig);
-  } else idleTime += dt;
-  pos.y = terrain.height(pos.x, pos.z);
+    const nf = facing + d * Math.min(1, dt * (7 + speed));
+    yawRate += ((nf - facing) / Math.max(dt, 1e-3) - yawRate) * Math.min(1, dt * 10);
+    facing = nf;
+    walkTime += dt * gaitCadence(Math.max(speed, 0.6), hero.data.rig);
+  } else {
+    yawRate *= Math.max(0, 1 - dt * 10);
+    idleTime += dt;
+  }
+  const tilt = Math.max(0, Math.min(1, speed / 3));
+  bank += (Math.max(-0.28, Math.min(0.28, -yawRate * 0.05)) * tilt - bank) * Math.min(1, dt * 8);
+
+  // terrain under the feet: pelvis height + foot pitch
+  const [hF, hB] = slopeAt(pos.x, pos.z, facing);
+  const hC = terrain.height(pos.x, pos.z);
+  const slope = Math.max(-0.6, Math.min(0.6, Math.atan((hF - hB) / 0.7)));
+  slopeS += (slope - slopeS) * Math.min(1, dt * 10);
+  const yT = (hF + hB + 2 * hC) / 4 - Math.min(0.1, Math.abs(hF - hB) * 0.12);
+  yS = Math.abs(yT - yS) > 1.5 ? yT : yS + (yT - yS) * Math.min(1, dt * 14);
+  pos.y = yS;
+
   const cf = combat.update(inventory.isOpen() ? 0 : dt, pos, moving);
   if (cf.respawn) {
     pos.copy(spawn);
+    yS = spawn.y;
+    vel.set(0, 0, 0);
+    speed = 0;
     target = null;
     camTarget.copy(spawn);
+    lookAhead.set(0, 0, 0);
   }
   if (cf.face !== null && !moving) {
     let d = cf.face - facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 14);
-    hero.group.rotation.y = facing;
   }
-  hero.group.rotation.x = combat.dead ? -1.4 : 0;
+
+  // hit reaction (hp drop) + death fall
+  if (combat.hp < lastHp - 0.001 && !combat.dead) {
+    hitT = 0;
+    shake = Math.min(0.3, shake + 0.12);
+  } else if (combat.hp <= 0 && lastHp > 0) shake = 0.3;
+  lastHp = combat.hp;
+  hitT += dt;
+  const hitU = hitT / 0.38;
+  const hit = hitU < 1 ? Math.sin(Math.PI * Math.pow(hitU, 0.55)) : 0;
+  deathT = combat.dead ? deathT + dt : 0;
+  const fallU = Math.min(1, deathT / 0.8);
+  const fall = 1 + 2.2 * Math.pow(fallU - 1, 3) + 1.2 * Math.pow(fallU - 1, 2); // ease-out-back: small overshoot, settles
+  hero.group.rotation.set(
+    -1.45 * (combat.dead ? fall : 0) + (combat.dead ? 0 : Math.max(-0.08, Math.min(0.1, (speed - prevSpeed) / Math.max(dt, 1e-3) * 0.006))) - hit * 0.05,
+    facing,
+    combat.dead ? 0.12 * fall : bank,
+  );
+  if (combat.dead) pos.y += 0.1 * fall;
   hud.set(combat.hp, combat.maxHp, combat.kills, combat.wave, combat.dead, combat.alive);
   const rig = hero.data.rig, arm = hero.data.params.armRestAngle;
   const attacking = cf.attackU >= 0 && !combat.dead;
   const gait = moving && !combat.dead;
-  const clip = attacking ? 'attack' : gait ? gaitClip(SPEED) : 'idle';
+  const clip = attacking ? 'attack' : gait ? gaitClip(speed) : 'idle';
   const targetPose = attacking
     ? attackPose(Math.min(1, cf.attackU), rig, arm)
     : gait
-      ? samplePose(gaitClip(SPEED), 0, rig, arm, { speed: SPEED, phase: walkTime })
+      ? samplePose(gaitClip(speed), idleTime, rig, arm, { speed, phase: walkTime, blend: Math.min(1, (speed - 0.3) / 0.9) })
       : samplePose('idle', idleTime, rig, arm);
-  hero.setPose(blender.update(targetPose, dt, clip));
+  hero.setPose(applyExtras(blender.update(targetPose, dt, clip), { footPitch: slopeS * 0.8, hit, limp: combat.dead ? fallU : 0 }));
 
   // camera, lights, world streaming
-  camTarget.lerp(pos, Math.min(1, dt * 5));
+  lookAhead.lerp(dv.copy(vel).multiplyScalar(0.4), 1 - Math.exp(-dt * 2.5));
+  dv.copy(pos).add(lookAhead);
+  camTarget.lerp(dv, 1 - Math.exp(-dt * 6));
   camera.position.copy(camTarget).add(ISO_OFFSET);
   camera.lookAt(camTarget);
+  if (shake > 0.002) {
+    const st = timer.getElapsed();
+    camera.position.x += Math.sin(st * 83) * shake;
+    camera.position.y += Math.sin(st * 97) * shake * 0.6;
+    camera.position.z += Math.sin(st * 71) * shake;
+    shake *= Math.exp(-dt * 9);
+  } else shake = 0;
   moon.position.copy(camTarget).add(new Vector3(-14, 30, 10));
   moon.target.position.copy(camTarget);
   torch.position.set(pos.x + 0.6, pos.y + 2.4, pos.z + 0.4);
@@ -410,8 +507,14 @@ function frame() {
     }
   }
 
-  const mm = marker.material as MeshBasicMaterial;
-  mm.opacity = Math.max(0, mm.opacity - dt * 1.8);
+  if (!target) markerOn = false;
+  markerAge += dt;
+  markerA = markerOn ? 1 : Math.max(0, markerA - dt * 3);
+  const mp = (markerAge * 1.3) % 1;
+  markerMat.opacity = markerA * 0.9;
+  markerIn.scale.setScalar(1 + 0.1 * Math.sin(markerAge * 10));
+  markerPulse.scale.setScalar(0.7 + mp * 1.5);
+  pulseMat.opacity = markerA * (1 - mp) * 0.85;
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
