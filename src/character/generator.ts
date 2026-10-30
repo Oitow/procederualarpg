@@ -171,6 +171,9 @@ export function buildCharacter(
         color: new Color(l.def.material.color),
         metalness: l.def.material.metalness,
         roughness: l.def.material.roughness,
+        ...(l.def.material.emissive
+          ? { emissive: new Color(l.def.material.emissive), emissiveIntensity: l.def.material.emissiveIntensity ?? 1 }
+          : {}),
         side: l.def.thickness > 0 ? FrontSide : DoubleSide,
       });
     return makeMesh(l.mesh, l.normals, mat, l.def.name);

@@ -2,6 +2,7 @@ import { MathUtils } from 'three';
 import type { PartId } from './anatomy';
 import type { Cage, CageFaceInfo } from './cage';
 import { Crease, PolyMesh, computeVertexNormals, faceNormal } from './polymesh';
+import { Rng } from './rng';
 import { BONE_COUNT } from './rig';
 
 /**
@@ -43,6 +44,8 @@ export interface LayerMaterial {
   color: string;
   metalness: number;
   roughness: number;
+  emissive?: string;
+  emissiveIntensity?: number;
 }
 
 export interface LayerDef {
@@ -69,6 +72,8 @@ export interface LayerDef {
   surfaceNoise?: number;
   /** Subdivision level relative to the body (e.g. -1 for cheap accessories). */
   subdivisionDelta?: number;
+  /** Drop a random fraction (0-1) of the covered cage faces → holes (broken armour). */
+  holes?: { density: number; seed: number };
   material: LayerMaterial;
 }
 
@@ -257,6 +262,10 @@ export function buildLayerShells(cage: Cage, layers: LayerDef[], scale: number):
         faceFlare.set(f, flare);
       }
     }
+    if (def.holes && selected.length > 3) {
+      const kept = dropFaces(body, selected, def.holes.density, def.holes.seed);
+      selected.splice(0, selected.length, ...kept);
+    }
     if (selected.length === 0) continue;
 
     // ---- per-vertex offsets ------------------------------------------------
@@ -417,4 +426,47 @@ function erodeCoverage(body: PolyMesh, covered: Uint8Array): Uint8Array {
     hidden[f] = ok ? 1 : 0;
   }
   return hidden;
+}
+
+/**
+ * Randomly remove faces (holes) while keeping every vertex fan connected, so the
+ * solidified shell stays closed-manifold (no pinched vertices).
+ */
+function dropFaces(body: PolyMesh, selected: number[], density: number, seed: number): number[] {
+  const rng = new Rng(seed);
+  const alive = new Set(selected);
+  const byVertex = new Map<number, number[]>();
+  for (const f of selected) for (const v of body.face(f)) (byVertex.get(v) ?? byVertex.set(v, []).get(v)!).push(f);
+  const fanConnected = (v: number): boolean => {
+    const fs = byVertex.get(v)!.filter((f) => alive.has(f));
+    if (fs.length <= 1) return true;
+    const edgeOf = (f: number) => {
+      const fv = body.face(f);
+      const i = fv.indexOf(v);
+      return [fv[(i + 1) % fv.length], fv[(i + fv.length - 1) % fv.length]];
+    };
+    const seen = new Set([fs[0]]);
+    const stack = [fs[0]];
+    while (stack.length) {
+      const e = edgeOf(stack.pop()!);
+      for (const g of fs) {
+        if (seen.has(g)) continue;
+        const eg = edgeOf(g);
+        if (e[0] === eg[0] || e[0] === eg[1] || e[1] === eg[0] || e[1] === eg[1]) {
+          seen.add(g);
+          stack.push(g);
+        }
+      }
+    }
+    return seen.size === fs.length;
+  };
+  const maxDrop = Math.floor(selected.length * 0.6);
+  let dropped = 0;
+  for (const f of selected) {
+    if (dropped >= maxDrop || rng.next() >= density) continue;
+    alive.delete(f);
+    if (body.face(f).every(fanConnected)) dropped++;
+    else alive.add(f);
+  }
+  return selected.filter((f) => alive.has(f));
 }

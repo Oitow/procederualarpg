@@ -31,6 +31,15 @@ or `character-forge.html` with that `url`, so the link stays the same.
 - `main.ts` – isometric orthographic camera (follows player), tap/click-to-move with hold-to-steer, pinch/wheel zoom,
   WASD, moonlight + flickering torch, player = `buildCharacter` (Rogue outfit, subdivision 1)
 
+- `inventory.ts` – DOM inventory/equipment menu (bag + 9 slots), equip → hero rebuilt with `itemToLayers`,
+  weapon on `hand_R`; loot drops picked up by walking over; prop colliders (circles) per chunk, `World.resolve`
+- No post-processing: EffectComposer/bloom rendered black/white in tests → glow = additive halo sprites + emissive.
+
+## Items (`src/items/`)
+`generateItem(seed)` → rarity (broken…divine), base type, affixes, name; `theme` (material, element, broken, glow)
+is derived from the name so looks follow names ("Broken" = holes + rust via `LayerDef.holes`, "Flaming" = fire,
+"Divine" = gold glow, "of Hell" = burning red). `itemToLayers` (armour), `buildWeaponMesh` (sword/axe/mace/dagger).
+
 ## Character system map (`src/character/`)
 Pipeline: `params → rig → cage → layers → subdivision → detail → geometry → SkinnedMesh`
 - `params.ts` – parameters, ranges, presets (Human, Heroic, Brute, Elf, Dwarf, Goblin), seeded variation

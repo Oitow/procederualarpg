@@ -4,13 +4,11 @@ import {
   CanvasTexture,
   Color,
   Group,
-  HalfFloatType,
   Material,
   Object3D,
   Sprite,
   SpriteMaterial,
   SphereGeometry,
-  WebGLRenderTarget,
   DirectionalLight,
   Fog,
   HemisphereLight,
@@ -27,10 +25,6 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { buildCharacter, makeParams, samplePose, type CharacterModel } from '../character';
 import { RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
 import { Inventory, type Equipment } from './inventory';
@@ -71,8 +65,6 @@ scene.add(torch);
 const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 const ISO_OFFSET = new Vector3(1, 1.15, 1).normalize().multiplyScalar(60);
 let zoom = 16; // visible world height in meters
-let composer: EffectComposer | null = null;
-let bloom: UnrealBloomPass | null = null;
 function resize() {
   const w = innerWidth;
   const h = innerHeight;
@@ -210,16 +202,7 @@ function spawnDrop(item: Item, x: number, z: number) {
   });
 }
 
-// bloom: high threshold so only strong emissives glow
-composer = new EffectComposer(
-  renderer,
-  new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: mobile ? 0 : 4 }),
-);
-composer.addPass(new RenderPass(scene, camera));
-bloom = new UnrealBloomPass(new Vector2(innerWidth * (mobile ? 0.5 : 1), innerHeight * (mobile ? 0.5 : 1)), 0.7, 0.55, 1.6);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
-composer.setPixelRatio(renderer.getPixelRatio());
+
 resize();
 
 // click marker
@@ -398,7 +381,7 @@ function frame() {
   const mm = marker.material as MeshBasicMaterial;
   mm.opacity = Math.max(0, mm.opacity - dt * 1.8);
 
-  composer!.render(dt);
+  renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 frame();
