@@ -35,6 +35,10 @@ or `character-forge.html` with that `url`, so the link stays the same.
   weapon on `hand_R`; loot drops picked up by walking over; prop colliders (circles) per chunk, `World.resolve`
 - No post-processing: EffectComposer/bloom rendered black/white in tests → glow = additive halo sprites + emissive.
 
+- `monsters/` (spider: 8 legs 2-bone IK stepping gait; rat: sine body/tail), `combat.ts` (waves of ~5 every 5 s,
+  cap 25, auto-attack nearest in 1.6 m, weapon stats, contact damage, respawn), `hud.ts` (HP orb, kills/wave; CSS injected)
+- Hero animation: `gaitCadence` phase + `PoseBlender` cross-fades + `attackPose(progress)`.
+
 ## Items (`src/items/`)
 `generateItem(seed)` → rarity (broken…divine), base type, affixes, name; `theme` (material, element, broken, glow)
 is derived from the name so looks follow names ("Broken" = holes + rust via `LayerDef.holes`, "Flaming" = fire,

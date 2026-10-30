@@ -25,9 +25,11 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { buildCharacter, makeParams, samplePose, type CharacterModel } from '../character';
+import { PoseBlender, attackPose, buildCharacter, gaitCadence, gaitClip, makeParams, samplePose, type CharacterModel } from '../character';
 import { RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
 import { Inventory, type Equipment } from './inventory';
+import { Combat } from './combat';
+import { Hud } from './hud';
 import { PALETTE, World, createTerrain, regionName } from './world';
 
 // ---------------------------------------------------------------------------
@@ -103,7 +105,9 @@ function disposeTree(o: Object3D) {
   });
 }
 
+let currentEq: Equipment = {};
 function rebuildHero(eq: Equipment) {
+  currentEq = eq;
   const old = hero;
   const layers = Object.values(eq)
     .filter((i): i is Item => !!i && i.slot !== 'weapon')
@@ -134,6 +138,10 @@ function rebuildHero(eq: Equipment) {
     }
   }
 }
+
+const combat = new Combat(scene, world, terrain, () => currentEq);
+const hud = new Hud();
+combat.onHeroHit = () => hud.flashHit();
 
 // inventory + starting bag
 const inventory = new Inventory();
@@ -292,7 +300,8 @@ addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 // ---------------------------------------------------------------------------
 const timer = new Timer();
 const SPEED = 4.2;
-let walkTime = 0;
+let walkTime = 0; // gait phase in cycles
+const blender = new PoseBlender(0.2);
 let idleTime = 0;
 let facing = 0;
 const move = new Vector3();
@@ -307,7 +316,7 @@ function frame() {
   move.set(0, 0, 0);
   const kx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
   const kz = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
-  if (inventory.isOpen()) {
+  if (inventory.isOpen() || combat.dead) {
     target = null;
     steering = false;
   } else if (kx || kz) {
@@ -349,10 +358,33 @@ function frame() {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 12);
     hero.group.rotation.y = facing;
-    walkTime += dt * 1.25;
+    walkTime += dt * gaitCadence(SPEED, hero.data.rig);
   } else idleTime += dt;
   pos.y = terrain.height(pos.x, pos.z);
-  hero.setPose(samplePose(moving ? 'walk' : 'idle', moving ? walkTime : idleTime, hero.data.rig, hero.data.params.armRestAngle));
+  const cf = combat.update(inventory.isOpen() ? 0 : dt, pos, moving);
+  if (cf.respawn) {
+    pos.copy(spawn);
+    target = null;
+    camTarget.copy(spawn);
+  }
+  if (cf.face !== null && !moving) {
+    let d = cf.face - facing;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    facing += d * Math.min(1, dt * 14);
+    hero.group.rotation.y = facing;
+  }
+  hero.group.rotation.x = combat.dead ? -1.4 : 0;
+  hud.set(combat.hp, combat.maxHp, combat.kills, combat.wave, combat.dead, combat.alive);
+  const rig = hero.data.rig, arm = hero.data.params.armRestAngle;
+  const attacking = cf.attackU >= 0 && !combat.dead;
+  const gait = moving && !combat.dead;
+  const clip = attacking ? 'attack' : gait ? gaitClip(SPEED) : 'idle';
+  const targetPose = attacking
+    ? attackPose(Math.min(1, cf.attackU), rig, arm)
+    : gait
+      ? samplePose(gaitClip(SPEED), 0, rig, arm, { speed: SPEED, phase: walkTime })
+      : samplePose('idle', idleTime, rig, arm);
+  hero.setPose(blender.update(targetPose, dt, clip));
 
   // camera, lights, world streaming
   camTarget.lerp(pos, Math.min(1, dt * 5));
