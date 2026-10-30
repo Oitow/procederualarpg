@@ -6,15 +6,20 @@ import { build } from 'vite';
 const THREE = 'https://cdn.jsdelivr.net/npm/three@0.186.1';
 const LILGUI = 'https://cdn.jsdelivr.net/npm/lil-gui@0.21.0/dist/lil-gui.esm.min.js';
 
+const target = process.argv[2] === 'game' ? 'game' : 'lab';
+const ENTRY = target === 'game' ? 'src/game/main.ts' : 'src/viewer/main.ts';
+const OUT = target === 'game' ? 'gloomvale.html' : 'character-forge.html';
+const LAB_URL = 'https://claude.ai/artifact/E4KCVQrRGRqzfnSzx54fCK';
+
 await build({
   configFile: false,
   mode: 'artifact',
   logLevel: 'warn',
   build: {
     outDir: 'dist-artifact',
-    emptyOutDir: true,
+    emptyOutDir: false,
     minify: true,
-    lib: { entry: 'src/viewer/main.ts', formats: ['es'], fileName: () => 'forge.js' },
+    lib: { entry: ENTRY, formats: ['es'], fileName: () => 'forge.js' },
     rolldownOptions: { external: [/^three/, 'lil-gui'] },
   },
 });
@@ -28,7 +33,7 @@ const importMap = {
   },
 };
 
-const html = `<title>Character Forge</title>
+const labHtml = `<title>Character Forge</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
   :root {
@@ -72,6 +77,19 @@ const html = `<title>Character Forge</title>
 <script type="importmap">${JSON.stringify(importMap)}</script>
 <script type="module">${js}</script>
 `;
+const css = readFileSync('src/game/style.css', 'utf8');
+const gameHtml = `<title>Gloomvale</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>${css}</style>
+<div id="app"></div>
+<div id="vignette"></div>
+<header id="hud"><b id="region"></b><span id="seed"></span></header>
+<a id="lab" href="${LAB_URL}" target="_blank" rel="noopener">Lab</a>
+<footer id="hint">Tippen oder klicken zum Laufen · halten zum Steuern · zwei Finger / Mausrad zum Zoomen</footer>
+<script type="importmap">${JSON.stringify(importMap)}</script>
+<script type="module">${js}</script>
+`;
+const html = target === 'game' ? gameHtml : labHtml;
 mkdirSync('dist-artifact', { recursive: true });
-writeFileSync('dist-artifact/character-forge.html', html);
-console.log(`dist-artifact/character-forge.html (${(html.length / 1024).toFixed(0)} KB)`);
+writeFileSync(`dist-artifact/${OUT}`, html);
+console.log(`dist-artifact/${OUT} (${(html.length / 1024).toFixed(0)} KB)`);

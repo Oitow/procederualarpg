@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character Forge</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #14161a; color: #e8e6e3; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      #stats { position: fixed; left: 12px; bottom: 12px; padding: 8px 10px; background: rgba(10, 12, 15, 0.72); border-radius: 6px; font: 12px/1.5 ui-monospace, monospace; white-space: pre; pointer-events: none; }
+      #title { position: fixed; left: 12px; top: 10px; font-weight: 600; letter-spacing: 0.04em; opacity: 0.85; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="title">CHARACTER FORGE · procedural ARPG characters</div>
+    <div id="stats"></div>
+    <script type="module" src="../src/viewer/main.ts"></script>
+  </body>
+</html>

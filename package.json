@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build:artifact": "node scripts/build-artifact.mjs"
+    "build:artifact": "node scripts/build-artifact.mjs lab && node scripts/build-artifact.mjs game"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",

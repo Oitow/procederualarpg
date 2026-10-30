@@ -1,0 +1,11 @@
+:root { --ink: #d9d4c7; --dim: #8f9a92; --brass: #c9a45a; --night: #0b141b; color-scheme: dark; }
+html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink); overflow: hidden; font: 13px/1.4 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; }
+#vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(3, 6, 9, 0.6) 100%); }
+#hud { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+#hud b { font-family: Georgia, 'Times New Roman', serif; font-size: 22px; letter-spacing: 0.06em; color: var(--brass); text-shadow: 0 2px 8px #000; }
+#hud span { font-size: 11px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+#lab { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); color: var(--dim); text-decoration: none; border: 1px solid #2a3a3a; padding: 4px 10px; border-radius: 4px; background: rgba(8, 14, 18, 0.6); }
+#lab:focus-visible { outline: 2px solid var(--brass); }
+#hint { position: fixed; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 0; right: 0; text-align: center; color: var(--dim); font-size: 11px; pointer-events: none; padding: 0 16px; }

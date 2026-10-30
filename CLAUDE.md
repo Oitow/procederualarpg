@@ -2,19 +2,34 @@
 
 ## Vision
 Idle / auto-battler ARPG in the spirit of Diablo 2 / Path of Exile ("with everything": loot, skills,
-classes, gear). Built step by step. **Done so far: procedural character model system.**
+classes, gear). Built step by step. **Done so far: procedural character system, procedural isometric world prototype.**
 The owner writes in German (sometimes English); answer in the language they use.
+
+## Repo layout & workflow
+- **Game** (main product): `index.html` + `src/game/` – isometric, procedural world "Gloomvale". Dark, gritty palette
+  (deep greens, dark blues, warm torch accents). *Everything* is procedural: world, character, monsters, items.
+- **Lab** (test bench): `lab/index.html` + `src/viewer/` – Character Forge; new systems are tried here first.
+- Branches: work happens on the `claude/...` branch; it goes to `main` only after the owner approves.
+- Owner tests on the phone (portrait + touch) and gives feedback. Keep self-testing short (max ~3 checks), be token-efficient.
 
 ## Stack & commands
 TypeScript + three.js (0.186), lil-gui, Vite 8, Vitest 5, TypeScript 7.
-- `npm run dev` – viewer "Character Forge" (http://localhost:5173)
+- `npm run dev` – game at http://localhost:5173, lab at http://localhost:5173/lab/
 - `npm test` – 22 tests (topology, rig, layers, performance budget). Keep them green.
 - `npm run typecheck`, `npm run build`
 - `npm run build:artifact` – viewer as one HTML page in `dist-artifact/` (three + lil-gui via jsDelivr import map)
 
-Live viewer (claude.ai artifact, owned by the user): https://claude.ai/artifact/E4KCVQrRGRqzfnSzx54fCK
-To update it from a new session: `npm run build:artifact`, read the artifact first, then publish
-`dist-artifact/character-forge.html` with that `url`, so the link stays the same.
+Live pages (claude.ai artifacts, owned by the user; `npm run build:artifact` builds both into `dist-artifact/`):
+- Lab / Character Forge: https://claude.ai/artifact/E4KCVQrRGRqzfnSzx54fCK
+- Game / Gloomvale: https://claude.ai/artifact/MwDK3KVdfsSW4w5RfpYc38
+To update from a new session: build, read the artifact first, then publish `dist-artifact/gloomvale.html`
+or `character-forge.html` with that `url`, so the link stays the same.
+
+## Game map (`src/game/`)
+- `world.ts` – terrain height/moisture noise, 24 m chunks streamed around the player, instanced props
+  (pines, dead trees, rocks, grass, ruin pillars), water plane, `PALETTE`, procedural region names
+- `main.ts` – isometric orthographic camera (follows player), tap/click-to-move with hold-to-steer, pinch/wheel zoom,
+  WASD, moonlight + flickering torch, player = `buildCharacter` (Rogue outfit, subdivision 1)
 
 ## Character system map (`src/character/`)
 Pipeline: `params → rig → cage → layers → subdivision → detail → geometry → SkinnedMesh`
