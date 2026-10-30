@@ -1,6 +1,16 @@
 import {
   ACESFilmicToneMapping,
+  BufferGeometry,
+  CanvasTexture,
   Color,
+  Group,
+  HalfFloatType,
+  Material,
+  Object3D,
+  Sprite,
+  SpriteMaterial,
+  SphereGeometry,
+  WebGLRenderTarget,
   DirectionalLight,
   Fog,
   HemisphereLight,
@@ -17,7 +27,13 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { OUTFITS, buildCharacter, makeParams, samplePose } from '../character';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { buildCharacter, makeParams, samplePose, type CharacterModel } from '../character';
+import { RARITY_COLORS, buildWeaponMesh, generateItem, itemToLayers, type Item, type ItemSlot } from '../items';
+import { Inventory, type Equipment } from './inventory';
 import { PALETTE, World, createTerrain, regionName } from './world';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +71,8 @@ scene.add(torch);
 const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 const ISO_OFFSET = new Vector3(1, 1.15, 1).normalize().multiplyScalar(60);
 let zoom = 16; // visible world height in meters
+let composer: EffectComposer | null = null;
+let bloom: UnrealBloomPass | null = null;
 function resize() {
   const w = innerWidth;
   const h = innerHeight;
@@ -79,9 +97,130 @@ const spawn = world.findSpawn();
 world.update(spawn, 25);
 
 // player
-const hero = buildCharacter(makeParams({ seed, variation: 0.6, detail: { subdivisions: 1 } }), { layers: OUTFITS.Rogue });
+const heroParams = makeParams({ seed, variation: 0.6, detail: { subdivisions: 1 } });
+let hero: CharacterModel = buildCharacter(heroParams, { layers: [] });
 hero.group.position.copy(spawn);
 scene.add(hero.group);
+let weapon: Object3D | null = null;
+
+function disposeTree(o: Object3D) {
+  o.traverse((c) => {
+    const m = c as Object3D & { geometry?: BufferGeometry; material?: Material | Material[] };
+    m.geometry?.dispose();
+    if (m.material) (Array.isArray(m.material) ? m.material : [m.material]).forEach((x) => x.dispose());
+  });
+}
+
+function rebuildHero(eq: Equipment) {
+  const old = hero;
+  const layers = Object.values(eq)
+    .filter((i): i is Item => !!i && i.slot !== 'weapon')
+    .flatMap((i) => itemToLayers(i));
+  const next = buildCharacter(heroParams, { layers });
+  next.group.position.copy(old.group.position);
+  next.group.rotation.copy(old.group.rotation);
+  scene.remove(old.group);
+  if (weapon) {
+    weapon.parent?.remove(weapon);
+    disposeTree(weapon);
+    weapon = null;
+  }
+  old.dispose();
+  hero = next;
+  scene.add(hero.group);
+  if (eq.weapon) {
+    const hand = hero.skeleton.bones.find((b) => b.name === 'hand_R');
+    if (hand) {
+      weapon = new Group();
+      const w = buildWeaponMesh(eq.weapon);
+      // blade (+Y) -> forward (+Z) and slightly up (-Y along the hand)
+      w.rotation.x = Math.PI / 2 + 0.5;
+      w.position.set(0, 0.04, 0.02);
+      weapon.add(w);
+      weapon.userData.update = (dt: number) => w.userData.update?.(dt);
+      hand.add(weapon);
+    }
+  }
+}
+
+// inventory + starting bag
+const inventory = new Inventory();
+inventory.onEquipmentChange = rebuildHero;
+const startSpecs: [number, ItemSlot, Parameters<typeof generateItem>[1]?][] = [
+  [11, 'weapon', { rarity: 'rare' }], [12, 'weapon', { rarity: 'divine', level: 20 }], [13, 'head', { rarity: 'broken' }],
+  [14, 'chest', { rarity: 'common' }], [15, 'legs', { rarity: 'magic' }], [16, 'feet', { rarity: 'common' }],
+  [17, 'hands', { rarity: 'rare' }], [18, 'shoulders', { rarity: 'legendary', level: 12 }], [19, 'arms', { rarity: 'magic' }],
+  [20, 'waist', { rarity: 'common' }], [21, 'head', { rarity: 'divine', level: 25 }], [22, 'weapon', { rarity: 'legendary', level: 14 }],
+];
+for (const [sd, slot, o] of startSpecs) inventory.addToBag(generateItem(seed * 100 + sd, { slot, ...o }));
+
+// loot drops
+interface Drop { item: Item; mesh: Group; baseY: number; phase: number }
+const drops: Drop[] = [];
+const dropGeo = new SphereGeometry(0.18, 10, 8);
+function labelTexture(text: string, color: string): CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 48;
+  const g = c.getContext('2d')!;
+  g.font = '600 24px Georgia, serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(4,8,10,0.7)';
+  const w = Math.min(250, g.measureText(text).width + 20);
+  g.fillRect(128 - w / 2, 6, w, 36);
+  g.fillStyle = color;
+  g.fillText(text, 128, 25, 240);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  return t;
+}
+function spawnDrop(item: Item, x: number, z: number) {
+  const g = new Group();
+  const col = new Color(RARITY_COLORS[item.rarity]);
+  const glow = item.rarity === 'divine' || item.rarity === 'legendary' ? 3 : 1.6;
+  const m = new Mesh(dropGeo, new MeshBasicMaterial({ color: col.clone().multiplyScalar(glow), toneMapped: false }));
+  g.add(m);
+  const lbl = new Sprite(new SpriteMaterial({ map: labelTexture(item.name, RARITY_COLORS[item.rarity]), depthTest: false, transparent: true }));
+  lbl.scale.set(2.4, 0.45, 1);
+  lbl.position.y = 0.75;
+  lbl.renderOrder = 10;
+  g.add(lbl);
+  const y = terrain.height(x, z);
+  g.position.set(x, y + 0.35, z);
+  scene.add(g);
+  drops.push({ item, mesh: g, baseY: y + 0.35, phase: Math.random() * 6 });
+}
+{
+  const dropItems: [number, ItemSlot, Parameters<typeof generateItem>[1]?][] = [
+    [31, 'weapon', { rarity: 'magic' }], [32, 'chest', { rarity: 'rare' }], [33, 'head', { rarity: 'legendary', level: 10 }],
+    [34, 'feet', { rarity: 'broken' }], [35, 'weapon', { rarity: 'divine', level: 18 }], [36, 'hands', { rarity: 'common' }],
+  ];
+  dropItems.forEach(([sd, slot, o], i) => {
+    const a = (i / dropItems.length) * Math.PI * 2 + 0.4;
+    const r = 3.5 + (i % 3) * 1.2;
+    let x = spawn.x + Math.cos(a) * r;
+    let z = spawn.z + Math.sin(a) * r;
+    if (!terrain.isWalkable(x, z)) {
+      x = spawn.x + Math.cos(a) * 1.8;
+      z = spawn.z + Math.sin(a) * 1.8;
+    }
+    const p = world.resolve(x, z, 0.6);
+    spawnDrop(generateItem(seed * 100 + sd, { slot, ...o }), p.x, p.z);
+  });
+}
+
+// bloom: high threshold so only strong emissives glow
+composer = new EffectComposer(
+  renderer,
+  new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: mobile ? 0 : 4 }),
+);
+composer.addPass(new RenderPass(scene, camera));
+bloom = new UnrealBloomPass(new Vector2(innerWidth * (mobile ? 0.5 : 1), innerHeight * (mobile ? 0.5 : 1)), 0.7, 0.55, 1.6);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+composer.setPixelRatio(renderer.getPixelRatio());
+resize();
 
 // click marker
 const marker = new Mesh(
@@ -123,6 +262,7 @@ function setTarget(x: number, y: number, showMarker: boolean) {
 const canvas = renderer.domElement;
 canvas.style.touchAction = 'none';
 canvas.addEventListener('pointerdown', (e) => {
+  if (inventory.isOpen()) return;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
   if (pointers.size === 1) {
@@ -159,6 +299,9 @@ canvas.addEventListener('wheel', (e) => {
 
 const keys = new Set<string>();
 addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+const PLAYER_R = 0.35;
+const fix = { x: 0, z: 0, hit: false };
+let stuck = 0;
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
 // ---------------------------------------------------------------------------
@@ -181,7 +324,10 @@ function frame() {
   move.set(0, 0, 0);
   const kx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
   const kz = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
-  if (kx || kz) {
+  if (inventory.isOpen()) {
+    target = null;
+    steering = false;
+  } else if (kx || kz) {
     // screen-aligned directions for the 45° iso view
     move.set(kx + kz, 0, kz - kx).normalize();
     target = null;
@@ -197,10 +343,24 @@ function frame() {
   if (moving) {
     const nx = pos.x + move.x * SPEED * dt;
     const nz = pos.z + move.z * SPEED * dt;
-    if (terrain.isWalkable(nx, nz)) {
+    const r = world.resolve(nx, nz, PLAYER_R, fix);
+    const ox = pos.x;
+    const oz = pos.z;
+    if (terrain.isWalkable(r.x, r.z)) {
+      pos.x = r.x;
+      pos.z = r.z;
+    } else if (terrain.isWalkable(nx, nz) && !r.hit) {
       pos.x = nx;
       pos.z = nz;
     } else target = null;
+    if (target) {
+      const step = SPEED * dt;
+      stuck = Math.hypot(pos.x - ox, pos.z - oz) < step * 0.4 ? stuck + dt : 0;
+      if (stuck > 0.2) {
+        target = null;
+        stuck = 0;
+      }
+    } else stuck = 0;
     const want = Math.atan2(move.x, move.z);
     let d = want - facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -221,12 +381,26 @@ function frame() {
   torch.intensity = 13 + Math.sin(timer.getElapsed() * 11) * 0.8 + Math.sin(timer.getElapsed() * 7.3) * 0.6;
   world.update(pos);
 
+  weapon?.userData.update?.(dt);
+  const t = timer.getElapsed();
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    d.mesh.position.y = d.baseY + Math.sin(t * 2 + d.phase) * 0.08;
+    if (Math.hypot(d.mesh.position.x - pos.x, d.mesh.position.z - pos.z) < 0.9) {
+      inventory.addToBag(d.item);
+      scene.remove(d.mesh);
+      disposeTree(d.mesh);
+      (d.mesh.children[1] as Sprite).material.map?.dispose();
+      drops.splice(i, 1);
+    }
+  }
+
   const mm = marker.material as MeshBasicMaterial;
   mm.opacity = Math.max(0, mm.opacity - dt * 1.8);
 
-  renderer.render(scene, camera);
+  composer!.render(dt);
   requestAnimationFrame(frame);
 }
 frame();
 
-(window as unknown as { game: unknown }).game = { scene, camera, hero, world, setZoom: (z: number) => ((zoom = z), resize()) };
+(window as unknown as { game: unknown }).game = { scene, camera, get hero() { return hero; }, world, inventory, setZoom: (z: number) => ((zoom = z), resize()) };

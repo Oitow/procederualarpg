@@ -9,3 +9,42 @@ html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink
 #lab { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); color: var(--dim); text-decoration: none; border: 1px solid #2a3a3a; padding: 4px 10px; border-radius: 4px; background: rgba(8, 14, 18, 0.6); }
 #lab:focus-visible { outline: 2px solid var(--brass); }
 #hint { position: fixed; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 0; right: 0; text-align: center; color: var(--dim); font-size: 11px; pointer-events: none; padding: 0 16px; }
+
+/* ---- inventory ---- */
+#bag-btn { position: fixed; z-index: 20; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(44px + env(safe-area-inset-bottom, 0px)); width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--brass); background: radial-gradient(circle at 35% 30%, #1d2f2c, #0a1216); color: var(--ink); font-size: 28px; display: grid; place-items: center; box-shadow: 0 4px 14px #000a; cursor: pointer; touch-action: manipulation; }
+#bag-btn small { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; border-radius: 10px; background: var(--brass); color: #10160f; font: 700 12px/20px system-ui; text-align: center; padding: 0 4px; box-sizing: border-box; }
+#bag-btn:active { transform: scale(0.94); }
+#inv { position: fixed; inset: 0; z-index: 30; }
+#inv[hidden] { display: none; }
+.inv-backdrop { position: absolute; inset: 0; background: rgba(2, 5, 8, 0.55); }
+.inv-panel { position: absolute; display: flex; flex-direction: column; background: linear-gradient(180deg, #101c20, #0a1115); border: 1px solid #3a3322; box-shadow: 0 0 0 1px #000, 0 -8px 30px #000c; color: var(--ink); overflow: hidden; left: 0; right: 0; bottom: 0; top: 12vh; border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.inv-panel header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #2a3a3a; }
+.inv-panel header b { font: 20px Georgia, serif; color: var(--brass); letter-spacing: 0.06em; }
+.inv-panel .x { width: 44px; height: 44px; font-size: 20px; background: none; color: var(--dim); border: 1px solid #2a3a3a; border-radius: 6px; }
+.inv-body { flex: 1; overflow-y: auto; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 8px; -webkit-overflow-scrolling: touch; }
+.inv-col h4 { margin: 8px 0 6px; font: 12px system-ui; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.grid.slots { grid-template-columns: repeat(5, 1fr); }
+.cell { aspect-ratio: 1; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px; border: 1px solid #25343a; border-radius: 6px; background: #0b1519; color: var(--dim); overflow: hidden; font: inherit; }
+.cell.empty { opacity: 0.45; }
+.cell i { font-style: normal; font-size: 20px; opacity: 0.85; }
+.cell small { font-size: 9px; line-height: 1.1; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell.full { border-color: var(--rc); color: var(--rc); box-shadow: inset 0 0 10px color-mix(in srgb, var(--rc) 30%, transparent); }
+.cell.sel { outline: 2px solid var(--brass); outline-offset: 1px; }
+.detail { margin-top: 10px; padding: 10px 12px; border: 1px solid #3a3322; border-radius: 6px; background: #0c161a; min-height: 90px; }
+.detail h3 { margin: 0; font: 18px Georgia, serif; }
+.detail .sub { margin: 2px 0 6px; color: var(--dim); text-transform: capitalize; }
+.detail ul { list-style: none; margin: 0 0 8px; padding: 0; }
+.detail li { display: flex; justify-content: space-between; padding: 1px 0; }
+.detail li span { color: var(--dim); text-transform: capitalize; }
+.detail li.affix { color: #8fb8e8; }
+.detail .hint { margin: 0; color: var(--dim); }
+.detail .act { width: 100%; height: 46px; border: 1px solid var(--brass); border-radius: 6px; background: #2a2414; color: var(--brass); font: 600 15px system-ui; letter-spacing: 0.06em; }
+.detail .act:active { background: #3a3218; }
+@media (orientation: landscape) and (min-width: 600px) {
+  .inv-panel { left: auto; top: 0; width: min(760px, 70vw); border-radius: 0; padding-right: env(safe-area-inset-right, 0px); }
+  .inv-body { flex-direction: row; }
+  .inv-body .inv-col { flex: 1; min-width: 0; }
+  #bag-btn { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (orientation: landscape) and (max-height: 500px) { .cell { min-height: 40px; } .cell small { display: none; } }

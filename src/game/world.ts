@@ -243,9 +243,21 @@ function placeProps(t: Terrain, cx: number, cz: number): Placement[] {
   return out;
 }
 
-function buildProps(t: Terrain, cx: number, cz: number): Group {
+export interface Collider {
+  x: number;
+  z: number;
+  r: number;
+}
+const COLLIDER_R: Partial<Record<Placement['kind'], number>> = { pine: 0.35, dead: 0.35, rock: 0.55, pillar: 0.45 };
+
+function buildProps(t: Terrain, cx: number, cz: number): { group: Group; colliders: Collider[] } {
   const group = new Group();
   const all = placeProps(t, cx, cz);
+  const colliders: Collider[] = [];
+  for (const p of all) {
+    const r = COLLIDER_R[p.kind];
+    if (r) colliders.push({ x: p.x, z: p.z, r: r * p.scale });
+  }
   const rng = new Rng(cx * 31 + cz * 17 + t.seed);
   const m = new Matrix4();
   const e = new Object3D();
@@ -269,7 +281,7 @@ function buildProps(t: Terrain, cx: number, cz: number): Group {
     inst.computeBoundingSphere();
     group.add(inst);
   }
-  return group;
+  return { group, colliders };
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +291,7 @@ function buildProps(t: Terrain, cx: number, cz: number): Group {
 export class World {
   readonly group = new Group();
   readonly terrainMeshes: Mesh[] = [];
-  private chunks = new Map<string, { terrain: Mesh; props: Group }>();
+  private chunks = new Map<string, { terrain: Mesh; props: Group; colliders: Collider[] }>();
   readonly water: Mesh;
 
   constructor(readonly terrain: Terrain, private radius = 2) {
@@ -309,10 +321,10 @@ export class World {
     todo.sort((a, b) => a[2] - b[2]);
     for (const [cx, cz] of todo.slice(0, budget)) {
       const terrain = buildTerrainMesh(this.terrain, cx, cz);
-      const props = buildProps(this.terrain, cx, cz);
+      const { group: props, colliders } = buildProps(this.terrain, cx, cz);
       this.group.add(terrain, props);
       this.terrainMeshes.push(terrain);
-      this.chunks.set(`${cx},${cz}`, { terrain, props });
+      this.chunks.set(`${cx},${cz}`, { terrain, props, colliders });
     }
     for (const [key, c] of this.chunks) {
       if (wanted.has(key)) continue;
@@ -322,6 +334,34 @@ export class World {
       this.terrainMeshes.splice(this.terrainMeshes.indexOf(c.terrain), 1);
       this.chunks.delete(key);
     }
+  }
+
+  /** Push a circle (x,z,r) out of nearby prop colliders. Returns the corrected position. */
+  resolve(x: number, z: number, r: number, out = { x: 0, z: 0, hit: false }) {
+    out.hit = false;
+    const pcx = Math.floor(x / CHUNK_SIZE);
+    const pcz = Math.floor(z / CHUNK_SIZE);
+    for (let iter = 0; iter < 2; iter++)
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const c = this.chunks.get(`${pcx + dx},${pcz + dz}`);
+          if (!c) continue;
+          for (const o of c.colliders) {
+            const ox = x - o.x;
+            const oz = z - o.z;
+            const min = r + o.r;
+            const d2 = ox * ox + oz * oz;
+            if (d2 >= min * min) continue;
+            const d = Math.sqrt(d2) || 1e-4;
+            const k = (min - d) / d;
+            x += (d2 === 0 ? 1e-4 : ox) * k;
+            z += (d2 === 0 ? 0 : oz) * k;
+            out.hit = true;
+          }
+        }
+    out.x = x;
+    out.z = z;
+    return out;
   }
 
   /** Find walkable ground near a point (spiral search). */
